@@ -316,3 +316,39 @@ class Server:
                     '%r not in %r'
                     % (header['Status'], self._http_allowed_codes)
                 )
+               
+class ProxyPoolV2(ProxyPool):
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+    async def get(self, scheme):
+        scheme = scheme.upper()
+        # 单独处理HTTP
+        if scheme == "HTTP":
+            chosenProxy = None
+            # 首先检测现有的池中是否有满足需求的代理。
+            for priority, proxy in self._pool:
+                if scheme in proxy.schemes and \
+                        proxy.types[scheme] == "High":
+                    chosenProxy = proxy
+                    self._pool.remove((proxy.priority, proxy))
+                    break
+            else:
+                # 尝试获取20个代理，没有就算了
+                for i in range(0, 20):
+                    chosenProxy = await self._import(scheme)
+                    if chosenProxy.types[scheme] == "High":
+                        logger.info(f"{chosenProxy} is good.")
+                        break
+                    else:
+                        logger.warning(f"{chosenProxy} is bad.")
+            return chosenProxy
+        # 非HTTP，直接使用。
+        for priority, proxy in self._pool:
+            if scheme in proxy.schemes:
+                chosen = proxy
+                self._pool.remove((proxy.priority, proxy))
+                break
+        else:
+            chosen = await self._import(scheme)
+        return chosen
+ProxyPool.get = ProxyPoolV2.get
